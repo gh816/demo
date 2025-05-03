@@ -1,7 +1,12 @@
 <template>
   <div class="report-container">
     <div class="header custom-header">
-      <img src="@/assets/back.svg" alt="Back" class="back-icon" @click="goBack" />
+      <img
+        src="@/assets/back.svg"
+        alt="Back"
+        class="back-icon"
+        @click="goBack"
+      />
       <span class="title-text">雅思口语评分报告</span>
       <img src="@/assets/Share.svg" alt="Share" class="share-icon" />
     </div>
@@ -21,12 +26,16 @@
             </div>
           </div>
           <div class="total-score-container">
-            <img 
-              src="@/assets/band.svg" 
-              class="band-image"
-              alt="Band Score"
-              style="width: 120px; height: 120px; margin-top: -20px;"
-            />
+            <div class="hexagon-container">
+              <canvas id="hexagon-canvas" width="120" height="120"></canvas>
+              <div class="score-display">
+                <div class="band">B A N D</div>
+                <div class="score">{{ averageScore.toFixed(1) }}</div>
+                <div class="simulation-text">
+                  Simulated by<br />Certified IELTS<br />Examiner
+                </div>
+              </div>
+            </div>
             <div class="score-desc">
               分数说明 <el-icon><InfoFilled /></el-icon>
             </div>
@@ -35,18 +44,19 @@
 
         <!-- 雷达图容器 -->
         <div id="radar-chart" style="width: 100%; height: 300px"></div>
-        
       </div>
       <div class="more-details">
-          <!-- 更新链接文本 -->
-          <el-link type="primary" :underline="false" @click="handleClick">查看练习详情 ></el-link>
-        </div>
+        <!-- 更新链接文本 -->
+        <el-link type="primary" :underline="false" @click="handleClick"
+          >查看练习详情 ></el-link
+        >
+      </div>
     </div>
   </div>
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed, onUnmounted } from "vue"; // 添加onUnmounted
 import { InfoFilled } from "@element-plus/icons-vue"; // Removed Share
 import * as echarts from "echarts/core";
 import { RadarChart } from "echarts/charts";
@@ -86,7 +96,7 @@ const scores = ref<ScoreData>({
   流利: 0,
   词汇: 0,
   语法: 0,
-  发音: 0
+  发音: 0,
 });
 const error = ref<string | null>(null);
 
@@ -97,28 +107,37 @@ const mockApiResponse: ApiResponse = {
     流利: 7.0,
     词汇: 6.0,
     语法: 6.0,
-    发音: 5.0
-  }
+    发音: 5.0,
+  },
 };
-
 
 const goBack = () => {
   console.log("Go back");
 };
 const handleClick = () => {
-  console.log('跳转路由逻辑');
-  
-}
+  console.log("跳转路由逻辑");
+};
 
-// ECharts 初始化
+const averageScore = computed(() => {
+  const scoreValues = Object.values(scores.value);
+  if (scoreValues.length === 0) return 0;
+  const sum = scoreValues.reduce((acc, score) => acc + score, 0);
+  return sum / scoreValues.length;
+});
+
+// 存储echarts实例的引用，以便在组件卸载时销毁
+let radarChart: echarts.ECharts | null = null;
+
+// ECharts 初始化 和 Canvas 绘制
 onMounted(() => {
-  // 先加载数据再初始化图表
+  // 先加载数据
   reportTime.value = mockApiResponse.reportTime;
   scores.value = { ...mockApiResponse.scores };
-  
+
+  // 初始化 ECharts 雷达图
   const chartDom = document.getElementById("radar-chart");
   if (chartDom) {
-    const myChart = echarts.init(chartDom);
+    radarChart = echarts.init(chartDom);
     const option = {
       radar: {
         indicator: [
@@ -274,27 +293,133 @@ onMounted(() => {
         },
       ],
     };
-    myChart.setOption(option);
+    radarChart.setOption(option);
 
     // 监听窗口大小变化，重新渲染图表
-    window.addEventListener("resize", () => {
-      myChart.resize();
-    });
+    window.addEventListener("resize", handleResize);
   } else {
     console.error("Radar chart container not found");
   }
-  // 这里可以替换为真实的API调用
-  // const response = await fetch('/api/scores');
-      
-  // 直接使用mock数据
-  reportTime.value = mockApiResponse.reportTime;
-  scores.value = mockApiResponse.scores;
-      
+
+  // 绘制六边形
+  const canvas = document.getElementById("hexagon-canvas") as HTMLCanvasElement;
+  if (canvas) {
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      const width = canvas.width;
+      const height = canvas.height;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const radius = Math.min(width, height) / 2 - 5; // 边缘留出一点空间
+
+      // 清除之前的绘制内容
+      ctx.clearRect(0, 0, width, height);
+
+      // 绘制六边形
+      ctx.beginPath();
+
+      // 从顶部顶点开始，顺时针绘制六边形
+      const startAngle = -Math.PI / 2; // 从正上方开始（-90度）
+      const cornerRadius = 8; // 圆角大小，可以调整这个值来控制圆角程度
+
+      // 计算六个顶点的坐标
+      const vertices = [];
+      for (let i = 0; i < 6; i++) {
+        const currentAngle = startAngle + (i * Math.PI) / 3;
+        vertices.push({
+          x: centerX + radius * Math.cos(currentAngle),
+          y: centerY + radius * Math.sin(currentAngle),
+        });
+      }
+
+      // 绘制带圆角的六边形
+      for (let i = 0; i < 6; i++) {
+        const current = vertices[i];
+        const next = vertices[(i + 1) % 6];
+        const prev = vertices[(i - 1 + 6) % 6];
+
+        // 计算当前顶点到前后顶点的方向向量
+        const toPrev = { x: prev.x - current.x, y: prev.y - current.y };
+        const toNext = { x: next.x - current.x, y: next.y - current.y };
+
+        // 计算向量长度
+        const toPrevLength = Math.sqrt(
+          toPrev.x * toPrev.x + toPrev.y * toPrev.y
+        );
+        const toNextLength = Math.sqrt(
+          toNext.x * toNext.x + toNext.y * toNext.y
+        );
+
+        // 计算圆角起点和终点（从顶点向内移动一定距离）
+        const startPoint = {
+          x: current.x + (toPrev.x / toPrevLength) * cornerRadius,
+          y: current.y + (toPrev.y / toPrevLength) * cornerRadius,
+        };
+
+        const endPoint = {
+          x: current.x + (toNext.x / toNextLength) * cornerRadius,
+          y: current.y + (toNext.y / toNextLength) * cornerRadius,
+        };
+
+        // 第一个点，移动到起点
+        if (i === 0) {
+          ctx.moveTo(startPoint.x, startPoint.y);
+        }
+
+        // 绘制从上一个顶点到当前顶点的曲线
+        ctx.lineTo(startPoint.x, startPoint.y);
+        // 使用二次贝塞尔曲线绘制圆角
+        ctx.quadraticCurveTo(current.x, current.y, endPoint.x, endPoint.y);
+      }
+
+      ctx.closePath();
+
+      // 添加渐变效果
+      const gradient = ctx.createLinearGradient(
+        centerX - radius,
+        centerY - radius,
+        centerX + radius,
+        centerY + radius
+      );
+      gradient.addColorStop(0, "#5BC7D8");
+      gradient.addColorStop(1, "#4dd0e1");
+
+      // 添加阴影效果
+      // ctx.shadowColor = "rgba(91, 199, 216, 0.4)";
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+
+      // 添加背景填充色
+      ctx.fillStyle = "#140E3C";
+      ctx.fill();
+
+      ctx.strokeStyle = gradient; // 使用渐变色描边
+      ctx.lineWidth = 1; // 稍微加粗线条使其更清晰
+      ctx.stroke();
+    }
+  }
+});
+
+// 处理窗口大小变化的函数
+const handleResize = () => {
+  if (radarChart) {
+    radarChart.resize();
+  }
+};
+
+onUnmounted(() => {
+  window.removeEventListener("resize", handleResize);
+
+  // 销毁ECharts实例
+  if (radarChart) {
+    radarChart.dispose();
+    radarChart = null;
+  }
 });
 </script>
 
 <style>
-
 body {
   margin: 0;
   background-color: #1a1b2f;
@@ -335,12 +460,11 @@ body {
   font-size: 18px;
   font-weight: 500;
   text-align: center;
-  flex-grow: 1; 
+  flex-grow: 1;
 }
 
-
 .report-card {
-  background: #34316E;
+  background: #34316e;
   border-radius: 15px;
   padding: 25px;
   position: relative;
@@ -353,7 +477,6 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 15px;
-
 }
 
 .title-section {
@@ -373,9 +496,9 @@ body {
 }
 
 .sub-title {
-  background-color: #3DE1FA;
-  color: #2A2450;
-  padding: 1px 5px; 
+  background-color: #3de1fa;
+  color: #2a2450;
+  padding: 1px 5px;
   border-radius: 5px;
   font-size: 12px;
   font-weight: bold;
@@ -408,26 +531,56 @@ body {
   vertical-align: middle;
 }
 
-
 .total-score-container {
   text-align: center;
-  position: relative; 
+  position: relative;
   margin-top: 5px;
 }
 
+.hexagon-container {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  margin-bottom: 5px;
+}
 
+#hexagon-canvas {
+  display: block;
+}
+
+.score-display {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
 
 .band {
   font-size: 12px;
   color: #ffffff;
   margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 12;
+  font-family: "PingFang SC", sans-serif; /* Add font family */
 }
 
 .score {
-  font-size: 36px;
+  font-size: 25px;
   font-weight: bold;
   color: #ffffff;
   line-height: 1;
+  margin-bottom: 4px;
+}
+
+.simulation-text {
+  font-size: 9px;
+  color: #e0e0e0;
+  line-height: 1.1;
+  text-align: center;
+  margin-top: 6px;
+  font-family: "PingFang SC", sans-serif;
+  font-weight: 100;
 }
 
 .score-desc {
@@ -436,7 +589,8 @@ body {
   cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: center; /* 居中 */
+  justify-content: center;
+  margin-top: 8px;
 }
 
 .score-desc .el-icon {
@@ -447,10 +601,9 @@ body {
 #radar-chart {
   margin-top: -10px;
   margin-bottom: 10px;
-  background: url('@/assets/radar-bg.svg') no-repeat center center;
-  background-size: contain;
+  background: url("@/assets/radar-bg.svg") no-repeat center center/contain;
   position: relative;
-  background-color: #34316E;
+  background-color: #34316e;
   border-radius: 10px;
 }
 
