@@ -56,29 +56,29 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, computed, onUnmounted } from "vue"; // 添加onUnmounted
-import { InfoFilled } from "@element-plus/icons-vue"; // Removed Share
+import { ref, onMounted, computed, onUnmounted, onBeforeUnmount } from "vue";
+import { InfoFilled } from "@element-plus/icons-vue";
 import * as echarts from "echarts/core";
-import { RadarChart } from "echarts/charts";
 import {
   TitleComponent,
   TooltipComponent,
-  GridComponent,
   LegendComponent,
-  PolarComponent,
+  RadarComponent,
+  GridComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
+import * as d3 from "d3";
 
 echarts.use([
   TitleComponent,
   TooltipComponent,
-  GridComponent,
-  RadarChart,
-  CanvasRenderer,
   LegendComponent,
-  PolarComponent,
+  RadarComponent,
+  CanvasRenderer,
+  GridComponent,
 ]);
 
+// 定义接口
 interface ScoreData {
   流利: number;
   词汇: number;
@@ -91,23 +91,23 @@ interface ApiResponse {
   scores: ScoreData;
 }
 
-const reportTime = ref("");
+const reportTime = ref<string>("");
 const scores = ref<ScoreData>({
-  流利: 0,
-  词汇: 0,
-  语法: 0,
-  发音: 0,
+  词汇: 6.0,
+  流利: 7.0,
+  发音: 5.0,
+  语法: 6.0,
 });
 const error = ref<string | null>(null);
 
 // 模拟API响应数据结构
 const mockApiResponse: ApiResponse = {
-  reportTime: "2024-12-31 10:06",
+  reportTime: "2024年8月2日",
   scores: {
-    流利: 7.0,
     词汇: 6.0,
-    语法: 6.0,
+    流利: 7.0,
     发音: 5.0,
+    语法: 6.0,
   },
 };
 
@@ -128,178 +128,28 @@ const averageScore = computed(() => {
 // 存储echarts实例的引用，以便在组件卸载时销毁
 let radarChart: echarts.ECharts | null = null;
 
+// 窗口大小变化处理函数
+const handleResize = () => {
+  if (radarChart) {
+    radarChart.resize();
+  }
+  // 如果d3雷达图存在，也需要重新渲染
+  if (document.getElementById("radar-chart")) {
+    drawRadarChartWithD3();
+  }
+};
+
 // ECharts 初始化 和 Canvas 绘制
 onMounted(() => {
   // 先加载数据
   reportTime.value = mockApiResponse.reportTime;
   scores.value = { ...mockApiResponse.scores };
 
-  // 初始化 ECharts 雷达图
-  const chartDom = document.getElementById("radar-chart");
-  if (chartDom) {
-    radarChart = echarts.init(chartDom);
-    const option = {
-      radar: {
-        indicator: [
-          { name: "词汇", max: 9.0 },
-          { name: "流利", max: 9.0 },
-          { name: "发音", max: 9.0 },
-          { name: "语法", max: 9.0 },
-        ],
-        radius: "62%", // 调整雷达图大小
-        center: ["50%", "55%"], // 雷达图位置
-        shape: "circle", // 设置雷达图形状为圆形
-        startAngle: 45, // 添加起始角度来旋转图表
-        splitNumber: 4, // 设置为5个分割圈
-        axisName: {
-          color: "#ccc", // 指示器文字颜色调暗一些
-          fontSize: 14,
-          padding: [0, 0, 15, 0], // 增加底部padding，将标签往外推
-          formatter: (name: string) => {
-            const score = scores.value[name as keyof typeof scores.value];
-            let scoreTag = "";
+  // 使用d3绘制雷达图
+  drawRadarChartWithD3();
 
-            // 根据不同指标设置不同颜色的分数标签
-            if (name === "词汇") {
-              scoreTag = "scorePurple";
-            } else if (name === "流利") {
-              scoreTag = "scoreTeal";
-            } else if (name === "发音") {
-              scoreTag = "scoreRed";
-            } else if (name === "语法") {
-              scoreTag = "scoreYellow";
-            }
-
-            // 返回富文本格式，先显示文字，然后是带圆圈的分数
-            return ` {nameText|${name}} {${scoreTag}|${score.toFixed(1)}}`;
-          },
-          rich: {
-            // 文字样式
-            nameText: {
-              color: "#ffffff",
-              fontSize: 14,
-              padding: [0, 5, 0, 0],
-              align: "right",
-            },
-            // 分数样式 - 完美圆形标签
-            scoreTeal: {
-              backgroundColor: "#00bfa5",
-              color: "#fff",
-              borderRadius: 20,
-              width: 32,
-              height: 32,
-              lineHeight: 32,
-              padding: [0, 0],
-              fontSize: 14,
-              fontWeight: "bold",
-              align: "center",
-            },
-            scorePurple: {
-              backgroundColor: "#ab47bc",
-              color: "#fff",
-              borderRadius: 20,
-              width: 32,
-              height: 32,
-              lineHeight: 32,
-              padding: [0, 0],
-              fontSize: 14,
-              fontWeight: "bold",
-              align: "center",
-            },
-            scoreYellow: {
-              backgroundColor: "#ffab00",
-              color: "#fff",
-              borderRadius: 20,
-              width: 32,
-              height: 32,
-              lineHeight: 32,
-              padding: [0, 0],
-              fontSize: 14,
-              fontWeight: "bold",
-              align: "center",
-            },
-            scoreRed: {
-              backgroundColor: "#ff5252",
-              color: "#fff",
-              borderRadius: 20,
-              width: 32,
-              height: 32,
-              lineHeight: 32,
-              padding: [0, 0],
-              fontSize: 14,
-              fontWeight: "bold",
-              align: "center",
-            },
-          },
-        },
-        splitArea: {
-          // 分隔区域样式 - 模拟设计稿内部层次感
-          areaStyle: {
-            color: [
-              "rgba(40, 42, 70, 0.3)", // 更深的区域
-              "rgba(35, 37, 65, 0.3)", // 稍浅的区域
-            ],
-            shadowColor: "rgba(0, 0, 0, 0.2)",
-            shadowBlur: 10,
-          },
-        },
-        axisLine: {
-          // 坐标轴线 - 更细更暗
-          show: false, // 设置为 false 来隐藏轴线
-          lineStyle: {
-            color: "rgba(255, 255, 255, 0.2)",
-            width: 1,
-          },
-        },
-        splitLine: {
-          // 分隔线 - 更细更暗
-          lineStyle: {
-            color: "rgba(255, 255, 255, 0.2)",
-            width: 1,
-          },
-        },
-      },
-      series: [
-        {
-          name: "口语评分",
-          type: "radar",
-          data: [
-            {
-              value: [
-                // 更新数据顺序以匹配新的 indicator 顺序
-                scores.value.词汇, // 词汇分数在前
-                scores.value.流利, // 流利分数在后
-                scores.value.发音, // 发音分数
-                scores.value.语法, // 语法分数
-              ],
-              name: "分数",
-            },
-          ],
-          symbol: "circle", // 数据点标记形状
-          symbolSize: 4, // 数据点标记大小 (减小)
-          itemStyle: {
-            // 数据点样式
-            color: "#4dd0e1", // 数据点颜色 (浅蓝绿色)
-          },
-          lineStyle: {
-            // 雷达图线条样式
-            color: "#4dd0e1", // 线条颜色 (浅蓝绿色)
-            width: 2,
-          },
-          areaStyle: {
-            // 雷达图区域填充样式 - 使用更匹配的颜色和透明度
-            color: "rgba(77, 208, 225, 0.5)", // 填充颜色及透明度 (浅蓝绿色，半透明)
-          },
-        },
-      ],
-    };
-    radarChart.setOption(option);
-
-    // 监听窗口大小变化，重新渲染图表
-    window.addEventListener("resize", handleResize);
-  } else {
-    console.error("Radar chart container not found");
-  }
+  // 监听窗口大小变化，重新渲染图表
+  window.addEventListener("resize", handleResize);
 
   // 绘制六边形
   const canvas = document.getElementById("hexagon-canvas") as HTMLCanvasElement;
@@ -315,7 +165,6 @@ onMounted(() => {
       // 清除之前的绘制内容
       ctx.clearRect(0, 0, width, height);
 
-      // 绘制六边形
       ctx.beginPath();
 
       // 从顶部顶点开始，顺时针绘制六边形
@@ -401,20 +250,193 @@ onMounted(() => {
   }
 });
 
-// 处理窗口大小变化的函数
-const handleResize = () => {
-  if (radarChart) {
-    radarChart.resize();
-  }
+// 使用d3.js绘制雷达图
+const drawRadarChartWithD3 = () => {
+  // 清除之前的SVG
+  d3.select("#radar-chart svg").remove();
+
+  const chartDom = document.getElementById("radar-chart");
+  if (!chartDom) return;
+
+  // 设置图表尺寸和中心点
+  const width = chartDom.clientWidth;
+  const height = 300; // 根据你的div高度设置
+
+  // 向左下方调整中心点
+  const centerX = width / 2 - 5; // 向左移动5px
+  const centerY = height / 2 - 15; // 现在只向上移动15px，比之前少移动一些，相当于向下调整
+
+  const radius = (Math.min(width, height) / 2) * 0.62; // 与echarts一致的半径比例
+
+  // 创建SVG
+  const svg = d3
+    .select("#radar-chart")
+    .append("svg")
+    .attr("width", width)
+    .attr("height", height)
+    .style("position", "absolute")
+    .style("top", 0)
+    .style("left", 0)
+    .style("z-index", 2); // 确保在背景图之上
+
+  // 数据和刻度 - 保持原始顺序，不改变菱形
+  const maxScore = 9.0; // 最大分数
+  const features = ["词汇", "流利", "发音", "语法"]; // 恢复原始顺序
+  const angleSlice = (Math.PI * 2) / features.length;
+
+  // 分数缩放函数
+  const rScale = d3.scaleLinear().domain([0, maxScore]).range([0, radius]);
+
+  // 构建雷达图数据点
+  const radarData = features.map((feature, i) => {
+    const value = scores.value[feature];
+    const scaledValue = rScale(value);
+    // 修正角度计算，从顶部开始，顺时针旋转，确保从正中心开始绘制
+    // 添加45度的偏移
+    const angle = angleSlice * i - Math.PI / 2 + Math.PI / 4;
+    return {
+      feature,
+      value,
+      x: centerX + scaledValue * Math.cos(angle),
+      y: centerY + scaledValue * Math.sin(angle),
+      angle, // 保存角度用于放置标签
+    };
+  });
+
+  // 使用d3.line类型正确的方式定义连接线生成器
+  const lineGenerator = d3
+    .line<{ x: number; y: number }>()
+    .x((d) => d.x)
+    .y((d) => d.y)
+    .curve(d3.curveLinearClosed);
+
+  // 绘制雷达图连线和区域
+  svg
+    .append("path")
+    .datum(radarData)
+    .attr("class", "radar-line")
+    .attr("d", lineGenerator as any) // 使用类型断言解决TypeScript错误
+    .style("fill", "none") // 移除填充色，改为透明
+    .style("stroke", "#4dd0e1") // 保留边框线条
+    .style("stroke-width", "2px");
+
+  // 标签位置数组 - 交换语法和流利的位置
+  const labelPositions = [
+    { feature: "词汇", angleIndex: 0 },
+    { feature: "语法", angleIndex: 1 },
+    { feature: "发音", angleIndex: 2 },
+    { feature: "流利", angleIndex: 3 },
+  ];
+
+  // 添加四个评分标签 - 使用自定义位置
+  labelPositions.forEach((labelPos) => {
+    const feature = labelPos.feature;
+    const value = scores.value[feature];
+    const i = labelPos.angleIndex;
+
+    // 计算标签位置，放在雷达图外围一定距离处
+    const angle = angleSlice * i - Math.PI / 2 + Math.PI / 4;
+    const labelRadius = radius * 1.3; // 标签放在雷达图外30%的位置
+    const labelX = centerX + labelRadius * Math.cos(angle);
+    const labelY = centerY + labelRadius * Math.sin(angle);
+
+    // 创建标签组
+    const label = svg
+      .append("g")
+      .attr("class", "score-label")
+      .attr("transform", `translate(${labelX}, ${labelY})`);
+
+    label
+      .append("rect")
+      .attr("width", 70) // 增加胶囊宽度
+      .attr("height", 30) // 胶囊高度
+      .attr("x", -35) // 水平居中
+      .attr("y", -15) // 垂直居中
+      .attr("rx", 15) // 水平圆角半径，等于高度的一半，形成胶囊形状
+      .attr("ry", 15) // 垂直圆角半径
+      .style("fill", "#41407f") // 背景色
+      .style("opacity", 0.95) // 降低透明度，使其更加可见
+      .style("stroke", "#4a477e") // 添加边框
+      .style("stroke-width", "1px"); // 边框宽度
+
+    // 根据指标类型选择颜色
+    let bgColor;
+    if (feature === "流利") {
+      bgColor = "#00bfa5";
+    } else if (feature === "词汇") {
+      bgColor = "#ab47bc";
+    } else if (feature === "发音") {
+      bgColor = "#ff5252";
+    } else if (feature === "语法") {
+      bgColor = "#ffab00";
+    }
+
+    if (feature === "词汇" || feature === "语法") {
+      // 数字的圆形背景放在左侧
+      label
+        .append("circle")
+        .attr("r", 13) // 圆形背景半径为13，总宽度为26
+        .attr("cx", -15)
+        .attr("cy", 0)
+        .style("fill", bgColor);
+
+      // 添加分数值
+      label
+        .append("text")
+        .attr("text-anchor", "middle")
+        .attr("x", -15)
+        .attr("y", 5)
+        .attr("font-size", "14px")
+        .attr("font-weight", "bold")
+        .attr("fill", "#ffffff")
+        .text(value.toFixed(1));
+
+      // 添加右侧文本
+      label
+        .append("text")
+        .attr("text-anchor", "middle")
+        .attr("x", 15) // 胶囊右侧，更靠右
+        .attr("y", 5) // 垂直居中
+        .attr("font-size", "14px")
+        .attr("fill", "#ffffff")
+        .text(feature);
+    } else {
+      // 添加左侧文本
+      label
+        .append("text")
+        .attr("text-anchor", "middle")
+        .attr("x", -15)
+        .attr("y", 5)
+        .attr("font-size", "14px")
+        .attr("fill", "#ffffff")
+        .text(feature);
+
+      // 数字的圆形背景
+      label
+        .append("circle")
+        .attr("r", 13)
+        .attr("cx", 15)
+        .attr("cy", 0)
+        .style("fill", bgColor);
+
+      // 添加分数值
+      label
+        .append("text")
+        .attr("text-anchor", "middle")
+        .attr("x", 15)
+        .attr("y", 5)
+        .attr("font-size", "14px")
+        .attr("font-weight", "bold")
+        .attr("fill", "#ffffff")
+        .text(value.toFixed(1));
+    }
+  });
 };
 
-onUnmounted(() => {
+onBeforeUnmount(() => {
   window.removeEventListener("resize", handleResize);
-
-  // 销毁ECharts实例
   if (radarChart) {
     radarChart.dispose();
-    radarChart = null;
   }
 });
 </script>
@@ -607,8 +629,10 @@ body {
   border-radius: 10px;
 }
 
-#radar-chart canvas {
-  position: relative;
+#radar-chart svg {
+  position: absolute;
+  top: 0;
+  left: 0;
   z-index: 2;
 }
 
